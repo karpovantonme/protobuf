@@ -224,19 +224,6 @@ def _write_descriptor_set(ctx, proto_info, deps, option_deps, exports, descripto
         # Set `-option_dependencies_violation_msg=`
         args.add(ctx.label, format = OPTION_DEPS_FLAG_TEMPLATE)
 
-    if ctx.attr._strict_public_imports[BuildSettingInfo].value:
-        public_import_protos = depset(transitive = [export.check_deps_sources for export in exports])
-        if not public_import_protos:
-            # This line is necessary to trigger the check.
-            args.add("--allowed_public_imports=")
-        else:
-            args.add_joined(
-                "--allowed_public_imports",
-                public_import_protos,
-                map_each = proto_common.get_import_path,
-                join_with = ":",
-            )
-
     if proto_common.INCOMPATIBLE_ENABLE_PROTO_TOOLCHAIN_RESOLUTION:
         toolchain = ctx.toolchains[toolchains.PROTO_TOOLCHAIN]
         if not toolchain:
@@ -386,20 +373,20 @@ for use with MessageSet.
         # buildifier: disable=attr-license (calling attr.license())
         "licenses": attr.license() if hasattr(attr, "license") else attr.string_list(),
         "_experimental_proto_descriptor_sets_include_source_info": attr.label(
-            default = "//bazel/flags:experimental_proto_descriptor_sets_include_source_info",
+            default = Label("//bazel/flags:experimental_proto_descriptor_sets_include_source_info"),
         ),
         "_strict_proto_deps": attr.label(
-            default = "//bazel/flags:strict_proto_deps",
+            default = Label("//bazel/flags:strict_proto_deps"),
         ),
         "_strict_public_imports": attr.label(
-            default = "//bazel/flags:strict_public_imports",
+            default = Label("//bazel/flags:strict_public_imports"),
         ),
     } | toolchains.if_legacy_toolchain({
         "_proto_compiler": attr.label(
             cfg = "exec",
             executable = True,
             allow_files = True,
-            default = "//src/google/protobuf/compiler:protoc_minimal",
+            default = Label("//src/google/protobuf/compiler:protoc_minimal"),
         ),
     }),  # buildifier: disable=attr-licenses (attribute called licenses)
     fragments = [
