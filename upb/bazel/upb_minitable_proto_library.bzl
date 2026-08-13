@@ -28,21 +28,14 @@ def _upb_minitable_proto_library_aspect_impl(target, ctx):
         cc_provider = UpbMinitableCcInfo,
         dep_cc_provider = None,
         file_provider = _UpbWrappedGeneratedSrcsInfo,
+        provide_cc_shared_library_hints = False,
     )
 
 def _get_upb_minitable_proto_library_aspect_provides():
-    provides = [
+    return [
         UpbMinitableCcInfo,
         _UpbWrappedGeneratedSrcsInfo,
     ]
-
-    if hasattr(cc_common, "CcSharedLibraryHintInfo"):
-        provides.append(cc_common.CcSharedLibraryHintInfo)
-    elif hasattr(cc_common, "CcSharedLibraryHintInfo_6_X_getter_do_not_use"):
-        # This branch can be deleted once 6.X is not supported by upb rules
-        provides.append(cc_common.CcSharedLibraryHintInfo_6_X_getter_do_not_use)
-
-    return provides
 
 upb_minitable_proto_library_aspect = aspect(
     attrs = {
