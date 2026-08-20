@@ -13,6 +13,9 @@
 
 #include "upb/base/descriptor_constants.h"
 #include "upb/base/string_view.h"
+#include "upb/hash/common.h"
+#include "upb/hash/int_table.h"
+#include "upb/hash/str_table.h"
 #include "upb/mem/arena.h"
 #include "upb/message/accessors.h"
 #include "upb/message/array.h"
@@ -83,29 +86,69 @@ static bool upb_Clone_MessageValue(void* value, upb_CType value_type,
   UPB_UNREACHABLE();
 }
 
+static bool upb_Map_CloneValues(upb_table* t, upb_CType value_field_type,
+                                const upb_MiniTable* value_sub, int val_size,
+                                upb_Arena* arena) {
+  size_t size = upb_table_size(t);
+  for (size_t i = 0; i < size; i++) {
+    upb_tabent* ent = &t->entries[i];
+    if (!upb_tabent_isempty(ent)) {
+      upb_MessageValue val;
+      _upb_map_fromvalue(ent->val, &val, val_size);
+      if (!upb_Clone_MessageValue(&val, value_field_type, value_sub, arena)) {
+        return false;
+      }
+      upb_value cloned_tabval = {0};
+      if (!_upb_map_tovalue(&val, val_size, &cloned_tabval, arena)) {
+        return false;
+      }
+      ent->val = cloned_tabval;
+    }
+  }
+  return true;
+}
+
 upb_Map* upb_Map_DeepClone(const upb_Map* map, upb_CType key_type,
                            upb_CType value_type,
                            const upb_MiniTable* map_entry_table,
                            upb_Arena* arena) {
-  upb_Map* cloned_map = _upb_Map_New(arena, map->key_size, map->val_size);
+  upb_Map* cloned_map = upb_Arena_Malloc(arena, sizeof(upb_Map));
   if (cloned_map == NULL) {
     return NULL;
   }
-  upb_MessageValue key, val;
-  size_t iter = kUpb_Map_Begin;
-  while (upb_Map_Next(map, &key, &val, &iter)) {
-    const upb_MiniTableField* value_field =
-        upb_MiniTable_MapValue(map_entry_table);
-    const upb_MiniTable* value_sub =
-        upb_MiniTableField_CType(value_field) == kUpb_CType_Message
-            ? upb_MiniTable_GetSubMessageTable(value_field)
-            : NULL;
-    upb_CType value_field_type = upb_MiniTableField_CType(value_field);
-    if (!upb_Clone_MessageValue(&val, value_field_type, value_sub, arena)) {
+  cloned_map->key_size = map->key_size;
+  cloned_map->val_size = map->val_size;
+  cloned_map->UPB_PRIVATE(is_frozen) = false;
+  cloned_map->UPB_PRIVATE(is_strtable) = map->UPB_PRIVATE(is_strtable);
+
+  const upb_MiniTableField* value_field =
+      upb_MiniTable_MapValue(map_entry_table);
+  const upb_MiniTable* value_sub = upb_MiniTable_SubMessage(value_field);
+  upb_CType value_field_type = upb_MiniTableField_CType(value_field);
+
+  bool is_primitive = value_field_type != kUpb_CType_Message &&
+                      value_field_type != kUpb_CType_String &&
+                      value_field_type != kUpb_CType_Bytes;
+
+  if (map->UPB_PRIVATE(is_strtable)) {
+    if (!upb_strtable_copy(&cloned_map->t.strtable, &map->t.strtable, arena)) {
       return NULL;
     }
-    if (!upb_Map_Set(cloned_map, key, val, arena)) {
+    if (!is_primitive) {
+      if (!upb_Map_CloneValues(&cloned_map->t.strtable.t, value_field_type,
+                               value_sub, map->val_size, arena)) {
+        return NULL;
+      }
+    }
+  } else {
+    if (!upb_inttable_copy(&cloned_map->t.inttable, &map->t.inttable, arena)) {
       return NULL;
+    }
+    if (!is_primitive) {
+      if (!upb_Map_CloneValues(&cloned_map->t.inttable.t, value_field_type,
+                               value_sub, map->val_size, arena)) {
+        return NULL;
+      }
     }
   }
   return cloned_map;
