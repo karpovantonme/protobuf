@@ -873,13 +873,44 @@ Message* AssureWritable(CMessage* self) {
     return nullptr;
   }
 
-  // Make self->message writable.
   const Reflection* reflection = parent_message->GetReflection();
-  Message* mutable_message = reflection->MutableMessage(
-      parent_message, self->parent_field_descriptor,
-      GetFactoryForMessage(self->parent)->message_factory);
-  if (mutable_message == nullptr) {
-    return nullptr;
+  Message* mutable_message = nullptr;
+  if (self->parent_field_descriptor->is_repeated()) {
+    int size =
+        reflection->FieldSize(*parent_message, self->parent_field_descriptor);
+    // Fast path: check index_hint first. Fall back to linear scan if elements
+    // have been shifted or reordered.
+    int index = self->index_hint;
+    if (index >= 0 && index < size &&
+        &reflection->GetRepeatedMessage(*parent_message,
+                                        self->parent_field_descriptor,
+                                        index) == self->message) {
+      mutable_message = reflection->MutableRepeatedMessage(
+          parent_message, self->parent_field_descriptor, index);
+    } else {
+      for (int i = 0; i < size; ++i) {
+        if (&reflection->GetRepeatedMessage(*parent_message,
+                                            self->parent_field_descriptor,
+                                            i) == self->message) {
+          mutable_message = reflection->MutableRepeatedMessage(
+              parent_message, self->parent_field_descriptor, i);
+          self->index_hint = i;
+          break;
+        }
+      }
+    }
+    if (mutable_message == nullptr) {
+      PyErr_SetString(PyExc_RuntimeError,
+                      "Could not find message in repeated field");
+      return nullptr;
+    }
+  } else {
+    mutable_message = reflection->MutableMessage(
+        parent_message, self->parent_field_descriptor,
+        GetFactoryForMessage(self->parent)->message_factory);
+    if (mutable_message == nullptr) {
+      return nullptr;
+    }
   }
   self->message = mutable_message;
   self->state = MESSAGE_MUTABLE;
@@ -1331,6 +1362,7 @@ CMessage* NewEmptyMessage(CMessageClass* type) {
   self->parent = nullptr;
   self->parent_field_descriptor = nullptr;
   self->state = MESSAGE_MUTABLE;
+  self->index_hint = -1;
 
   // Construct the lazy unique pointers using placement new.
   new (&self->composite_fields) LazyUniquePtr<CMessage::CompositeFieldsMap>();
@@ -2910,7 +2942,8 @@ void ContainerBase::RemoveFromParentCache() {
 
 CMessage* CMessage::BuildSubMessageFromPointer(
     const FieldDescriptor* field_descriptor, const Message* sub_message,
-    CMessageClass* message_class) {
+    CMessageClass* message_class, int index_hint,
+    MessageMutabilityState state) {
   if (PyObject* value =
           this->child_submessages.Get()->Get(sub_message, nullptr)) {
     return reinterpret_cast<CMessage*>(value);
@@ -2925,9 +2958,8 @@ CMessage* CMessage::BuildSubMessageFromPointer(
   Py_INCREF(this);
   cmsg->parent = this;
   cmsg->parent_field_descriptor = field_descriptor;
-  if (this->state == MESSAGE_FROZEN) {
-    cmsg->state = MESSAGE_FROZEN;
-  }
+  cmsg->index_hint = index_hint;
+  cmsg->state = this->state == MESSAGE_FROZEN ? MESSAGE_FROZEN : state;
   cmessage::SetSubmessage(this, cmsg);
   return cmsg;
 }

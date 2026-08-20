@@ -105,6 +105,9 @@ typedef struct CMessage : public ContainerBase {
   // Indicates the mutability state of this CMessage wrapper.
   MessageMutabilityState state;
 
+  // Index hint for repeated fields (or -1 if unknown/singular).
+  int index_hint;
+
   // A mapping indexed by field, containing weak references to contained objects
   // which need to implement the "Release" mechanism:
   // direct submessages, RepeatedCompositeContainer, RepeatedScalarContainer
@@ -132,7 +135,9 @@ typedef struct CMessage : public ContainerBase {
   // pointer to a message.
   CMessage* BuildSubMessageFromPointer(const FieldDescriptor* field_descriptor,
                                        const Message* sub_message,
-                                       CMessageClass* message_class);
+                                       CMessageClass* message_class,
+                                       int index_hint,
+                                       MessageMutabilityState state);
   CMessage* MaybeReleaseSubMessage(const Message* sub_message);
 } CMessage;
 

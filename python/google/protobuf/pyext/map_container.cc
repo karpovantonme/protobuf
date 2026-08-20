@@ -577,12 +577,13 @@ static MessageMapContainer* GetMessageMap(PyObject* obj) {
   return reinterpret_cast<MessageMapContainer*>(obj);
 }
 
-static PyObject* GetCMessage(MessageMapContainer* self,
-                             const Message* message) {
-  // Get or create the CMessage object corresponding to this message.
+// Get or create the CMessage object corresponding to this mutable message.
+// Map submessages are always created as MESSAGE_MUTABLE because AssureWritable
+// cannot lazily promote map elements (it cannot look up by key).
+static PyObject* GetCMessage(MessageMapContainer* self, Message* message) {
   return self->parent
       ->BuildSubMessageFromPointer(self->parent_field_descriptor, message,
-                                   self->message_class)
+                                   self->message_class, -1, MESSAGE_MUTABLE)
       ->AsPyObject();
 }
 
@@ -703,10 +704,22 @@ PyObject* MapReflectionFriend::MessageMapToStr(PyObject* _self) {
     if (key == nullptr) {
       return nullptr;
     }
-    value.reset(GetCMessage(self, &it.GetValueRef().GetMessageValue()));
-    if (value == nullptr) {
+    // We create a temporary, uncached CMessage solely for PyObject_Repr to
+    // format the message's text representation. We do not use GetCMessage or
+    // BuildSubMessageFromPointer here because this is a read-only iteration
+    // over const message pointers; caching these in parent->child_submessages
+    // with a read-only/default state would corrupt subsequent writable map
+    // lookups.
+    CMessage* cmsg = cmessage::NewEmptyMessage(self->message_class);
+    if (cmsg == nullptr) {
       return nullptr;
     }
+    cmsg->message = &it.GetValueRef().GetMessageValue();
+    Py_INCREF(Py_None);
+    cmsg->parent = reinterpret_cast<CMessage*>(Py_None);
+    cmsg->parent_field_descriptor = self->parent_field_descriptor;
+    cmsg->state = MESSAGE_FROZEN;
+    value.reset(cmsg->AsPyObject());
     if (PyDict_SetItem(dict.get(), key.get(), value.get()) < 0) {
       return nullptr;
     }
